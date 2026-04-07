@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>LASBOOK 상담 관리 시스템</title>
+<meta property="og:type" content="website">
+<meta property="og:title" content="LASBOOK 상담 관리 시스템">
+<meta property="og:description" content="LASBOOK 독서 교육 전문 상담 예약 시스템">
+<meta property="og:url" content="https://jocular-kitsune-54102c.netlify.app">
+<meta property="og:image" content="https://jocular-kitsune-54102c.netlify.app/og-image.png">
+<meta property="og:image:width" content="600">
+<meta property="og:image:height" content="315">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="LASBOOK 상담 관리 시스템">
+<meta name="twitter:description" content="LASBOOK 독서 교육 전문 상담 예약 시스템">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Noto Sans KR',sans-serif}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+
+const SK = { subs: "lasbook-s7", br: "lasbook-b7", pw: "lasbook-p7", url: "lasbook-url7", notices: "lasbook-notices7" };
+async function sGet(k) { try { const r = await new Promise(function(res) { try { var v = localStorage.getItem(k); res(v ? { value: v } : null); } catch(e) { res(null); } }); return r ? JSON.parse(r.value) : null; } catch { return null; } }
+async function sSet(k, v) { try { await new Promise(function(res) { try { localStorage.setItem(k, JSON.stringify(v)); res(true); } catch(e) { res(null); } }); } catch (e) { console.error(e); } }
+
+const T = {
+  bg: "#1a1008", bgLight: "#1e1309",
+  gold: "#ebcd7d", goldSoft: "#d7be87", goldWarm: "#d2b464",
+  goldDim: "#a08745", goldBorder: "#8b6914",
+  cream: "#f8f0e1", creamBorder: "#d2be96",
+  danger: "#c25555", success: "#5a9e5a",
+};
+
+const DEF_BR = [
+  { id: "singal", name: "신갈점", manager: "이정민", position: "지점장", phone: "010-8033-1110" },
+  { id: "bundang", name: "분당점", manager: "경기련", position: "지점장", phone: "010-7644-5049" },
+];
+const DEF_PW = "0000";
+
+const NETLIFY_URL = "https://jocular-kitsune-54102c.netlify.app";
+
+function makeFormUrl(siteUrl, branchId) {
+  if (siteUrl && siteUrl.trim()) {
+    return siteUrl.trim().replace(/\/$/, "") + "#" + branchId;
+  }
+  // file:// 프로토콜인 경우 Netlify URL 사용 (로컬에서 열어도 QR이 정상 작동)
+  if (window.location.protocol === "file:") {
+    return NETLIFY_URL + "/#" + branchId;
+  }
+  return window.location.origin + window.location.pathname + "#" + branchId;
+}
+
+function uid() { return Date.now() + "_" + Math.random().toString(36).slice(2, 8); }
+
+// ==========================================
+// 앱 — 모든 상태를 여기서 관리
+// ==========================================
+function App() {
+  const [screen, setScreen] = useState("demo");
+  const [selBr, setSelBr] = useState(null);
+  const [fromHash, setFromHash] = useState(false);
+  const [branches, setBranches] = useState([]);
+  const [subs, setSubs] = useState([]);
+  const [adminPw, setAdminPw] = useState(DEF_PW);
+  const [siteUrl, setSiteUrl] = useState("");
+  const [notices, setNotices] = useState([]);
+  const [ready, setReady] = useState(false);
+
+  const load = useCallback(async () => {
+    const [s, b, p, u, n] = await Promise.all([sGet(SK.subs), sGet(SK.br), sGet(SK.pw), sGet(SK.url), sGet(SK.notices)]);
+    const loadedBranches = b || DEF_BR;
+    setSubs(s || []); setBranches(loadedBranches); setAdminPw(p || DEF_PW); setSiteUrl(u || ""); setNotices(n || []);
+
+    // 해시 라우팅: #singal → 해당 지점 폼 바로 열기
+    const hash = window.location.hash.replace("#", "");
+    if (hash) {
+      const found = loadedBranches.find(br => br.id === hash);
+      if (found) { setSelBr(found); setScreen("branch"); setFromHash(true); }
+    }
+    setReady(true);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // ── ref로 항상 최신 subs 유지 ──
+  const subsRef = useRef(subs);
+  subsRef.current = subs;
+
+  // ── 데이터 조작: ref에서 읽고 → state 갱신 → ref 갱신 → 저장 ──
+  const addSub = (entry) => {
+    const next = [...subsRef.current, { ...entry, id: uid() }];
+    setSubs(next);
+    subsRef.current = next;
+    sSet(SK.subs, next);
+  };
+  const editSub = (id, newData) => {
+    const next = subsRef.current.map(s => s.id === id ? { ...s, ...newData } : s);
+    setSubs(next);
+    subsRef.current = next;
+    sSet(SK.subs, next);
+  };
+  const deleteSub = (id) => {
+    const next = subsRef.current.filter(s => s.id !== id);
+    setSubs(next);
+    subsRef.current = next;
+    sSet(SK.subs, next);
+  };
+  const saveBr = (u) => { setBranches(u); sSet(SK.br, u); };
+  const savePw = (p) => { setAdminPw(p); sSet(SK.pw, p); };
+  const saveUrl = (u) => { setSiteUrl(u); sSet(SK.url, u); };
+  const saveNotices = (n) => { setNotices(n); sSet(SK.notices, n); };
+
+  // 백업: 모든 데이터를 JSON 파일로 다운로드
+  const doBackup = () => {
+    const data = { subs, branches, adminPw, siteUrl, notices, exportDate: new Date().toLocaleString("ko-KR"), version: "lasbook-v7" };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `lasbook_backup_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  // 복원: JSON 파일 업로드 후 1회 복원
+  const doRestore = (file) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data.version || !data.version.startsWith("lasbook")) { alert("올바른 LASBOOK 백업 파일이 아닙니다."); return; }
+        if (!confirm(`백업 일시: ${data.exportDate || "알 수 없음"}\n상담 ${(data.subs || []).length}건, 지점 ${(data.branches || []).length}개\n\n현재 데이터가 모두 교체됩니다. 복원하시겠습니까?`)) return;
+        if (data.subs) { setSubs(data.subs); subsRef.current = data.subs; await sSet(SK.subs, data.subs); }
+        if (data.branches) { setBranches(data.branches); await sSet(SK.br, data.branches); }
+        if (data.adminPw) { setAdminPw(data.adminPw); await sSet(SK.pw, data.adminPw); }
+        if (data.siteUrl !== undefined) { setSiteUrl(data.siteUrl); await sSet(SK.url, data.siteUrl); }
+        if (data.notices) { setNotices(data.notices); await sSet(SK.notices, data.notices); }
+        alert("복원이 완료되었습니다.");
+      } catch (err) { alert("파일을 읽을 수 없습니다. 올바른 JSON 파일인지 확인해 주세요."); }
+    };
+    reader.readAsText(file);
+  };
+
+  if (!ready) return <Splash text="불러오는 중..." />;
+
+  if (screen === "branch" && selBr) {
+    return <BranchPage branch={selBr} adminPw={adminPw}
+      subs={subs.filter(s => s.branchId === selBr.id)}
+      notices={notices}
+      onAdd={addSub} onEdit={editSub} onDelete={deleteSub}
+      onBackup={doBackup} onRestore={doRestore}
+      onRefresh={load}
+      showBack={!fromHash}
+      onExit={() => { setScreen("demo"); setSelBr(null); window.location.hash = ""; }} />;
+  }
+  if (screen === "admin") {
+    return <AdminPage branches={branches} subs={subs} adminPw={adminPw} siteUrl={siteUrl}
+      notices={notices} onSaveNotices={saveNotices}
+      onEdit={editSub} onDelete={deleteSub}
+      onSaveBr={saveBr} onSavePw={savePw} onSaveUrl={saveUrl}
+      onBackup={doBackup} onRestore={doRestore}
+      onBack={() => setScreen("demo")} onReload={load} />;
+  }
+
+  return (
+    <div style={{ ...P.page, padding: "24px 16px" }}>
+      <div style={P.box}>
+        <Header title="LASBOOK 시스템" />
+        <Div />
+        <p style={{ fontSize: 13, color: T.goldSoft, fontWeight: 700, marginBottom: 12, textAlign: "center" }}>지점 선택</p>
+        <p style={{ fontSize: 11, color: T.goldDim, textAlign: "center", marginBottom: 10 }}>실제로는 각 지점마다 별도 URL이 부여됩니다</p>
+        {branches.map(b => (
+          <button key={b.id} onClick={() => { setSelBr(b); setScreen("branch"); }} style={{ ...P.menuBtn, marginBottom: 8, padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 16, fontWeight: 700 }}>{b.name}</span>
+              <span style={{ color: T.goldDim, fontSize: 14 }}>→</span>
+            </div>
+            {(b.manager || b.phone) && (
+              <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 12, color: T.goldDim, flexWrap: "wrap" }}>
+                {b.manager && <span>{b.manager}</span>}
+                {b.position && <span>{b.position}</span>}
+                {b.phone && <span>{b.phone}</span>}
+              </div>
+            )}
+          </button>
+        ))}
+        <Div />
+        <p style={{ fontSize: 13, color: T.goldSoft, fontWeight: 700, marginBottom: 12, textAlign: "center" }}>관리자 설정</p>
+        <button onClick={() => setScreen("admin")} style={{ ...P.gold, width: "100%", padding: "14px", fontSize: 15 }}>설정</button>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 관리 도구 (검색, 정렬, 일자)
+// ==========================================
+function AdminToolbar({ search, setSearch, sortBy, setSortBy, dateFrom, setDateFrom, dateTo, setDateTo }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <input type="text" placeholder="이름, 연락처, 자녀명 검색..." value={search} onChange={e => setSearch(e.target.value)}
+          style={{ ...P.inp, fontSize: 13, paddingLeft: 36, background: "rgba(248,240,225,0.08)", color: T.goldSoft, border: `1px solid rgba(139,105,20,0.3)` }} />
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 15, color: T.goldDim }}>🔍</span>
+        {search && <button onClick={() => setSearch("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: T.goldDim, fontSize: 16, cursor: "pointer" }}>✕</button>}
+      </div>
+      <button onClick={() => setOpen(!open)} style={{ background: "none", border: `1px solid rgba(139,105,20,0.25)`, borderRadius: 6, color: T.goldDim, fontSize: 11, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", width: "100%", textAlign: "center" }}>
+        {open ? "도구 닫기 ▲" : "정렬 · 일자 필터 ▼"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 10, background: "rgba(139,105,20,0.06)", border: `1px solid rgba(139,105,20,0.2)`, borderRadius: 8, padding: 14 }}>
+          <p style={{ fontSize: 11, color: T.goldDim, margin: "0 0 6px", fontWeight: 700 }}>정렬</p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {[{ k: "newest", l: "최신순" }, { k: "oldest", l: "오래된순" }, { k: "name", l: "이름순" }, { k: "age", l: "나이순" }].map(s => (
+              <button key={s.k} onClick={() => setSortBy(s.k)} style={{ padding: "6px 12px", borderRadius: 4, fontSize: 11, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${T.goldBorder}`, background: sortBy === s.k ? T.goldBorder : "transparent", color: sortBy === s.k ? T.bg : T.goldWarm, fontWeight: 600 }}>{s.l}</button>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: T.goldDim, margin: "0 0 6px", fontWeight: 700 }}>일자 지정</p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...P.inp, fontSize: 12, padding: "8px", flex: 1, background: "rgba(248,240,225,0.08)", color: T.goldSoft, border: `1px solid rgba(139,105,20,0.3)` }} />
+            <span style={{ color: T.goldDim, fontSize: 12 }}>~</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...P.inp, fontSize: 12, padding: "8px", flex: 1, background: "rgba(248,240,225,0.08)", color: T.goldSoft, border: `1px solid rgba(139,105,20,0.3)` }} />
+          </div>
+          {(dateFrom || dateTo) && <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ background: "none", border: "none", color: T.danger, fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginTop: 6, padding: 0 }}>일자 필터 초기화</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function filterAndSort(list, { search, sortBy, dateFrom, dateTo }) {
+  let r = [...list];
+  if (search.trim()) { const q = search.trim().toLowerCase(); r = r.filter(s => (s.parentName || "").toLowerCase().includes(q) || (s.phone || "").includes(q) || (s.childName || "").toLowerCase().includes(q)); }
+  if (dateFrom || dateTo) {
+    r = r.filter(s => {
+      const m = (s.timestamp || "").match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/);
+      if (!m) return true;
+      const d = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+      return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo);
+    });
+  }
+  if (sortBy === "oldest") r.reverse();
+  else if (sortBy === "name") r.sort((a, b) => (a.parentName || "").localeCompare(b.parentName || ""));
+  else if (sortBy === "age") { const o = ["4세","5세","6세","7세","초1","초2","초3","초4","초5","초6","중등 이상"]; r.sort((a, b) => o.indexOf(a.childAge) - o.indexOf(b.childAge)); }
+  return r;
+}
+
+// ==========================================
+// 수정 가능한 카드
+// ==========================================
+function EditableCard({ s, onEdit, onDelete, showBr }) {
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [memoEditing, setMemoEditing] = useState(false);
+  const [memoText, setMemoText] = useState(s.memo || "");
+  const [ef, setEf] = useState({});
+
+  const startEdit = () => { setEditing(true); setDeleting(false); setMemoEditing(false); setEf({ parentName: s.parentName, phone: s.phone, childName: s.childName, childAge: s.childAge, status: s.status, memo: s.memo || "" }); };
+
+  const doSave = () => {
+    onEdit(s.id, ef);
+    setEditing(false);
+  };
+
+  const doDelete = () => {
+    if (!s.id) return;
+    onDelete(s.id);
+  };
+
+  const saveMemo = () => {
+    onEdit(s.id, { memo: memoText });
+    setMemoEditing(false);
+  };
+
+  const cancelMemo = () => {
+    setMemoText(s.memo || "");
+    setMemoEditing(false);
+  };
+
+  // 수정 모드
+  if (editing) {
+    return (
+      <div style={{ ...P.card, border: `1px solid ${T.goldBorder}` }}>
+        <p style={{ fontSize: 12, color: T.gold, fontWeight: 700, margin: "0 0 10px" }}>수정 중</p>
+        <div style={{ display: "grid", gap: 8 }}>
+          <Mini label="보호자명" value={ef.parentName} onChange={v => setEf(p => ({ ...p, parentName: v }))} />
+          <Mini label="연락처" value={ef.phone} onChange={v => setEf(p => ({ ...p, phone: v }))} />
+          <Mini label="자녀명" value={ef.childName} onChange={v => setEf(p => ({ ...p, childName: v }))} />
+          <div>
+            <label style={{ fontSize: 11, color: T.goldDim, display: "block", marginBottom: 3 }}>나이</label>
+            <select value={ef.childAge} onChange={e => setEf(p => ({ ...p, childAge: e.target.value }))} style={{ ...P.inp, fontSize: 13, padding: "8px" }}>
+              {["4세","5세","6세","7세","초1","초2","초3","초4","초5","초6","중등 이상"].map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: T.goldDim, display: "block", marginBottom: 3 }}>상태</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              {["신규", "상담중", "완료"].map(st => (
+                <button key={st} onClick={() => setEf(p => ({ ...p, status: st }))} style={{ padding: "6px 12px", borderRadius: 4, fontSize: 11, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${T.goldBorder}`, background: ef.status === st ? T.goldBorder : "transparent", color: ef.status === st ? T.bg : T.goldWarm, fontWeight: 600 }}>{st}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: T.goldDim, display: "block", marginBottom: 3 }}>메모</label>
+            <textarea value={ef.memo} onChange={e => setEf(p => ({ ...p, memo: e.target.value }))} placeholder="메모를 입력하세요" rows={3}
+              style={{ ...P.inp, fontSize: 13, padding: "8px 10px", resize: "vertical", minHeight: 60 }} />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button onClick={doSave} style={{ ...P.gold, flex: 1, padding: "8px", fontSize: 12 }}>저장</button>
+          <button onClick={() => setEditing(false)} style={{ ...P.outline, flex: 1, padding: "8px", fontSize: 12 }}>취소</button>
+        </div>
+      </div>
+    );
+  }
+
+  // 일반 카드
+  return (
+    <div style={{ ...P.card, position: "relative", overflow: "hidden" }}>
+      {/* 삭제 확인 팝업 오버레이 */}
+      {deleting && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(26,16,8,0.92)", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", zIndex: 10, borderRadius: 8,
+        }}>
+          <p style={{ fontSize: 14, color: T.gold, fontWeight: 700, margin: "0 0 4px" }}>{s.parentName}님</p>
+          <p style={{ fontSize: 13, color: T.danger, margin: "0 0 16px" }}>삭제하시겠습니까?</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={doDelete} style={{ background: T.danger, border: "none", borderRadius: 6, color: "#fff", fontSize: 13, padding: "8px 20px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>삭제</button>
+            <button onClick={() => setDeleting(false)} style={{ background: "none", border: `1px solid ${T.goldBorder}`, borderRadius: 6, color: T.goldWarm, fontSize: 13, padding: "8px 20px", cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+          </div>
+        </div>
+      )}
+
+      {/* 헤더 (상태 + 수정/삭제) */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {showBr && <span style={{ ...P.badge, background: "#6b5a14" }}>{s.branchName}</span>}
+          <span style={{ ...P.badge, background: s.status === "신규" ? "#914414" : s.status === "상담중" ? "#8b6914" : "#146914" }}>{s.status}</span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={startEdit} style={{ background: "none", border: "none", color: T.goldWarm, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>수정</button>
+          <button onClick={() => setDeleting(true)} style={{ background: "none", border: "none", color: T.danger, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>삭제</button>
+        </div>
+      </div>
+
+      {/* 인적사항 */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px" }}>
+        <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>보호자: <span style={{ color: T.goldSoft, fontWeight: 600 }}>{s.parentName}</span></p>
+        <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>연락처: <span style={{ color: T.goldSoft, fontWeight: 600 }}>{s.phone}</span></p>
+        <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>자녀: <span style={{ color: T.goldSoft }}>{s.childName || "-"}</span></p>
+        <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>나이: <span style={{ color: T.goldSoft }}>{s.childAge}</span></p>
+      </div>
+      {s.interests && <p style={{ color: T.goldDim, fontSize: 13, margin: "8px 0 0" }}>관심: <span style={{ color: T.goldWarm }}>{s.interests}</span></p>}
+      <p style={{ color: T.goldDim, fontSize: 11, margin: "8px 0 0" }}>{s.timestamp}</p>
+
+      {/* 메모 영역 */}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(139,105,20,0.15)" }}>
+        {memoEditing ? (
+          <div>
+            <textarea value={memoText} onChange={e => setMemoText(e.target.value)} placeholder="메모를 입력하세요..."
+              rows={3} autoFocus
+              style={{
+                width: "100%", padding: "8px 10px", background: T.cream, border: `1px solid ${T.creamBorder}`,
+                borderRadius: 6, fontFamily: "inherit", fontSize: 13, color: T.bg, outline: "none",
+                boxSizing: "border-box", resize: "vertical", minHeight: 60,
+              }} />
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button onClick={saveMemo} style={{ ...P.gold, padding: "5px 14px", fontSize: 11 }}>메모 저장</button>
+              <button onClick={cancelMemo} style={{ ...P.outline, padding: "5px 14px", fontSize: 11 }}>취소</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            {s.memo ? (
+              <p style={{ fontSize: 13, color: T.goldSoft, margin: 0, lineHeight: 1.6, flex: 1, whiteSpace: "pre-wrap" }}>
+                <span style={{ fontSize: 11, color: T.goldDim }}>메모: </span>{s.memo}
+              </p>
+            ) : (
+              <p style={{ fontSize: 12, color: "rgba(160,135,69,0.4)", margin: 0, fontStyle: "italic" }}>메모 없음</p>
+            )}
+            <button onClick={() => { setMemoText(s.memo || ""); setMemoEditing(true); }} style={{
+              background: "none", border: `1px solid rgba(139,105,20,0.25)`, borderRadius: 4,
+              color: T.goldDim, fontSize: 11, padding: "3px 8px", cursor: "pointer", fontFamily: "inherit",
+              marginLeft: 8, flexShrink: 0,
+            }}>
+              {s.memo ? "메모 수정" : "+ 메모"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Mini({ label, value, onChange }) {
+  return <div><label style={{ fontSize: 11, color: T.goldDim, display: "block", marginBottom: 3 }}>{label}</label><input value={value || ""} onChange={e => onChange(e.target.value)} style={{ ...P.inp, fontSize: 13, padding: "8px 10px" }} /></div>;
+}
+
+// ==========================================
+// 지점 페이지 (독립) — localSubs 제거, 부모 상태만 사용
+// ==========================================
+function BranchPage({ branch, adminPw, subs, notices, onAdd, onEdit, onDelete, onBackup, onRestore, onRefresh, showBack, onExit }) {
+  useEffect(() => { document.title = `LASBOOK ${branch.name}`; }, [branch.name]);
+  const [mode, setMode] = useState("form");
+  const [fd, setFd] = useState({ parentName: "", phone: "--", childName: "", childAge: "", interests: [] });
+  const [saved, setSaved] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showCount, setShowCount] = useState(5);
+
+  const filtered = filterAndSort(subs, { search, sortBy, dateFrom, dateTo });
+
+  const interests = ["독서 사고력 진단", "독서 경진 대회 (장학금 1억원)", "고교 학점제 대비 상담", "영재교육원 / 국제학교 준비", "라스북 무료 체험 수업"];
+  const toggle = (item) => setFd(p => ({ ...p, interests: p.interests.includes(item) ? p.interests.filter(i => i !== item) : [...p.interests, item] }));
+
+  const handleSave = () => {
+    if (!fd.parentName.trim()) { alert("보호자 성명을 입력해 주세요."); return; }
+    if (fd.phone.replace(/-/g, "").length < 10) { alert("연락처를 정확히 입력해 주세요."); return; }
+    if (!fd.childAge) { alert("자녀 나이를 선택해 주세요."); return; }
+    onAdd({ parentName: fd.parentName, phone: fd.phone, childName: fd.childName, childAge: fd.childAge, interests: fd.interests.join(", "), branchId: branch.id, branchName: branch.name, timestamp: new Date().toLocaleString("ko-KR"), status: "신규" });
+    setSaved(true);
+  };
+
+  const resetForm = () => { setFd({ parentName: "", phone: "--", childName: "", childAge: "", interests: [] }); setSaved(false); setMode("form"); };
+
+  if (mode === "gate") return <PwGate title={`${branch.name} 관리자`} pw={adminPw} onOk={() => setMode("admin")} onBack={() => setMode("form")} />;
+
+  // ─── 관리자 현황 ───
+  if (mode === "admin") {
+    return (
+      <div style={{ ...P.page, padding: "16px" }}>
+        <div style={{ maxWidth: 600, margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <button onClick={() => setMode("form")} style={P.back}>← 상담 폼으로</button>
+            <button onClick={onRefresh} style={{ ...P.outline, padding: "6px 12px", fontSize: 11 }}>새로고침</button>
+          </div>
+          <Header title={`${branch.name} 접수 현황`} sub={`${branch.manager ? branch.manager + " · " : ""}총 ${subs.length}건${filtered.length !== subs.length ? ` (검색 ${filtered.length}건)` : ""}`} />
+          {/* 공지사항 표시 (아코디언) */}
+          {notices && notices.length > 0 && <NoticeAccordion notices={notices} />}
+
+          <AdminToolbar search={search} setSearch={setSearch} sortBy={sortBy} setSortBy={setSortBy} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40 }}><p style={{ color: T.goldDim, fontSize: 15 }}>{search || dateFrom || dateTo ? "검색 결과 없음" : "접수 내역 없음"}</p></div>
+          ) : (
+            <>
+              {filtered.slice(0, showCount).map(s => <EditableCard key={s.id} s={s} showBr={false} onEdit={onEdit} onDelete={onDelete} />)}
+              {filtered.length > showCount && (
+                <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: T.goldDim }}>더 보기:</span>
+                  {[10, 15, 20].filter(n => n > showCount).map(n => (
+                    <button key={n} onClick={() => setShowCount(n)} style={{ ...P.outline, padding: "6px 14px", fontSize: 12, color: T.goldWarm, borderColor: T.goldBorder }}>{n}명</button>
+                  ))}
+                  <button onClick={() => setShowCount(filtered.length)} style={{ ...P.outline, padding: "6px 14px", fontSize: 12, color: T.gold, borderColor: T.gold }}>전체 ({filtered.length})</button>
+                </div>
+              )}
+              {filtered.length > 5 && showCount > 5 && (
+                <div style={{ textAlign: "center", marginTop: 8 }}>
+                  <button onClick={() => setShowCount(5)} style={{ ...P.outline, padding: "6px 14px", fontSize: 12, color: T.goldDim, borderColor: T.goldBorder }}>접기 (5명)</button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 백업/복원 */}
+          <BackupRestore onBackup={onBackup} onRestore={onRestore} />
+        </div>
+      </div>
+    );
+  }
+
+  // ─── 저장 완료 ───
+  if (saved) {
+    return (
+      <div style={P.page}>
+        <div style={{ ...P.box, padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ width: 64, height: 64, border: `3px solid ${T.goldBorder}`, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><span style={{ fontSize: 32, color: T.gold }}>✓</span></div>
+          <h2 style={{ fontSize: 20, color: T.gold, margin: "0 0 12px" }}>저장되었습니다</h2>
+          <p style={{ fontSize: 14, color: T.goldSoft, margin: "0 0 24px" }}>빠른 시일 내에 연락드리겠습니다</p>
+          <div style={{ background: "rgba(139,105,20,0.15)", border: `1px solid rgba(139,105,20,0.4)`, borderRadius: 8, padding: 20, marginBottom: 16 }}>
+            <p style={{ fontSize: 14, color: T.gold, fontWeight: 600, margin: "0 0 4px" }}>궁금하신 점이 있으신가요?</p>
+            <p style={{ fontSize: 13, color: T.goldSoft, margin: "0 0 14px", lineHeight: 1.8 }}>블로그 비밀댓글로 남겨 주시면<br />담당자가 직접 답변드립니다</p>
+            <a href="https://blog.naver.com/isackman" target="_blank" rel="noreferrer" style={P.gold}>블로그에서 문의하기</a>
+          </div>
+          {branch.phone && <a href={`tel:${branch.phone.replace(/-/g, "")}`} style={{ display: "block", padding: "14px", textAlign: "center", background: "rgba(139,105,20,0.06)", border: `1px solid ${T.goldBorder}`, borderRadius: 8, color: T.gold, fontFamily: "inherit", fontSize: 15, fontWeight: 600, textDecoration: "none", marginBottom: 16 }}>전화로 상담하기<br /><span style={{ fontSize: 18, fontWeight: 700 }}>{branch.phone}</span></a>}
+          <p style={{ fontSize: 12, color: T.goldDim, marginBottom: 12 }}>LASBOOK {branch.name}</p>
+          <button onClick={resetForm} style={{ ...P.outline, padding: "10px 24px" }}>처음으로</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── 폼 ───
+  return (
+    <div style={P.page}>
+      <div style={P.box}>
+        {showBack && <button onClick={onExit} style={P.back}>← 메인으로</button>}
+        <Header title={`${branch.name} 상담 신청`} sub="독서 사고력 무료 진단" />
+        <Div />
+        <Sec>보호자 정보</Sec>
+        <FI label="보호자 성명" req placeholder="이름을 입력해 주세요" value={fd.parentName} onChange={v => setFd(p => ({ ...p, parentName: v }))} />
+        <PhoneInput value={fd.phone} onChange={v => setFd(p => ({ ...p, phone: v }))} />
+        <Div />
+        <Sec>자녀 정보</Sec>
+        <FI label="자녀 이름" placeholder="선택 사항입니다" value={fd.childName} onChange={v => setFd(p => ({ ...p, childName: v }))} />
+        <div style={{ marginBottom: 14 }}>
+          <label style={P.label}>자녀 나이 <span style={{ color: "#c9956b", fontSize: 11 }}>*필수</span></label>
+          <select value={fd.childAge} onChange={e => setFd(p => ({ ...p, childAge: e.target.value }))} style={P.sel}>
+            <option value="" disabled>나이를 선택해 주세요</option>
+            {["4세","5세","6세","7세","초1","초2","초3","초4","초5","초6","중등 이상"].map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <Div />
+        <Sec>관심 분야 (선택)</Sec>
+        {interests.map(item => (
+          <label key={item} style={{ display: "flex", alignItems: "center", marginBottom: 10, cursor: "pointer" }} onClick={() => toggle(item)}>
+            <div style={{ width: 20, height: 20, border: `1.5px solid ${T.goldBorder}`, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: fd.interests.includes(item) ? T.goldBorder : T.cream }}>
+              {fd.interests.includes(item) && <span style={{ color: T.cream, fontSize: 13, fontWeight: 700 }}>✓</span>}
+            </div>
+            <span style={{ fontSize: 14, color: "#e8cd91", marginLeft: 10 }}>{item}</span>
+          </label>
+        ))}
+        <Div />
+        <button onClick={handleSave} style={{ ...P.gold, width: "100%", padding: "15px", fontSize: 16, letterSpacing: 2 }}>저장하기</button>
+        <p style={{ fontSize: 11, color: T.goldDim, textAlign: "center", marginTop: 8, marginBottom: 16 }}>입력하신 정보는 상담 목적으로만 사용되며 외부에 공유되지 않습니다</p>
+        <div style={{ background: "rgba(139,105,20,0.1)", border: "1px solid rgba(139,105,20,0.3)", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 12 }}>
+          <p style={{ fontSize: 13, color: T.goldSoft, lineHeight: 1.8, margin: "0 0 10px" }}>더 자세한 문의 사항이 있으시면<br /><span style={{ color: T.gold, fontWeight: 700 }}>블로그 비밀댓글</span>로 남겨 주세요</p>
+          <a href="https://blog.naver.com/isackman" target="_blank" rel="noreferrer" style={P.outline}>블로그 문의하기 →</a>
+        </div>
+        {branch.phone && <a href={`tel:${branch.phone.replace(/-/g, "")}`} style={{ display: "block", width: "100%", padding: "14px", textAlign: "center", background: "rgba(139,105,20,0.06)", border: `1px solid ${T.goldBorder}`, borderRadius: 8, color: T.gold, fontFamily: "inherit", fontSize: 15, fontWeight: 600, textDecoration: "none", marginBottom: 12, boxSizing: "border-box" }}>전화로 상담하기<br /><span style={{ fontSize: 18, fontWeight: 700 }}>{branch.phone}</span></a>}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid rgba(139,105,20,0.2)`, textAlign: "center" }}>
+          <p style={{ fontSize: 12, color: T.goldDim, margin: "0 0 14px" }}>LASBOOK {branch.name}</p>
+          <button onClick={() => setMode("gate")} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "10px", background: "rgba(139,105,20,0.06)", border: `1px solid rgba(139,105,20,0.3)`, borderRadius: 6, color: T.goldDim, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+            <span style={{ fontSize: 14 }}>🔒</span><span>관리자 로그인</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 통합 관리자
+// ==========================================
+function AdminPage({ branches, subs, adminPw, siteUrl, notices, onSaveNotices, onEdit, onDelete, onSaveBr, onSavePw, onSaveUrl, onBackup, onRestore, onBack, onReload }) {
+  useEffect(() => { document.title = "LASBOOK 통합관리"; }, []);
+  const [tab, setTab] = useState("br");
+  const [filter, setFilter] = useState("전체");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showCount, setShowCount] = useState(5);
+
+  const brFiltered = filter === "전체" ? subs : subs.filter(s => s.branchName === filter);
+  const filtered = filterAndSort(brFiltered, { search, sortBy, dateFrom, dateTo });
+
+  return (
+    <div style={{ ...P.page, padding: "16px" }}>
+      <div style={{ maxWidth: 800, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <button onClick={onBack} style={P.back}>← 나가기</button>
+          <button onClick={onReload} style={{ ...P.outline, padding: "6px 12px", fontSize: 11 }}>새로고침</button>
+        </div>
+        <Header title="통합관리" sub={`${branches.length}개 지점 · 총 ${subs.length}건`} />
+        <div style={{ display: "flex", gap: 6, marginBottom: 20, justifyContent: "center", flexWrap: "wrap" }}>
+          {[{ k: "br", l: "지점 관리" }, { k: "data", l: "전체 현황" }, { k: "notice", l: "공지사항" }, { k: "set", l: "설정" }].map(t => (
+            <button key={t.k} onClick={() => setTab(t.k)} style={{ padding: "10px 14px", borderRadius: 6, border: `1px solid ${T.goldBorder}`, background: tab === t.k ? T.goldBorder : "transparent", color: tab === t.k ? T.bg : T.goldWarm, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{t.l}</button>
+          ))}
+        </div>
+
+        {tab === "br" && <BrMgmt branches={branches} siteUrl={siteUrl} onSave={onSaveBr} />}
+        {tab === "data" && (
+          <BranchDataView branches={branches} subs={subs} search={search} setSearch={setSearch} sortBy={sortBy} setSortBy={setSortBy} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} onEdit={onEdit} onDelete={onDelete} />
+        )}
+        {tab === "notice" && <NoticeBoard notices={notices} onSave={onSaveNotices} />}
+        {tab === "set" && (
+          <>
+            <Settings pw={adminPw} siteUrl={siteUrl} onSave={onSavePw} onSaveUrl={onSaveUrl} />
+            <BackupRestore onBackup={onBackup} onRestore={onRestore} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// QR 코드 생성 (캔버스 기반, 외부 API 불필요)
+// ==========================================
+function QRCanvas({ data, size = 200 }) {
+  const canvasRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let script = document.querySelector('script[data-qr]');
+    const render = () => {
+      try {
+        const qr = window.qrcode(0, "M");
+        qr.addData(data);
+        qr.make();
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const mc = qr.getModuleCount();
+        const cs = size / (mc + 8);
+        const pad = (size - mc * cs) / 2;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, size, size);
+        ctx.fillStyle = "#000";
+        for (let r = 0; r < mc; r++) for (let c = 0; c < mc; c++) {
+          if (qr.isDark(r, c)) ctx.fillRect(pad + c * cs, pad + r * cs, cs + 0.5, cs + 0.5);
+        }
+        setLoaded(true);
+      } catch (e) { console.error("QR error:", e); }
+    };
+    if (window.qrcode) { render(); return; }
+    if (!script) {
+      script = document.createElement("script");
+      script.setAttribute("data-qr", "1");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js";
+      script.onload = render;
+      document.head.appendChild(script);
+    } else { script.addEventListener("load", render); }
+  }, [data, size]);
+
+  return (
+    <div style={{ textAlign: "center", display: "flex", justifyContent: "center", alignItems: "center", flexDirection: "column" }}>
+      <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: 8, background: "#fff", display: "block" }} />
+      {!loaded && <p style={{ fontSize: 11, color: T.goldDim, margin: "4px 0 0" }}>QR 생성 중...</p>}
+    </div>
+  );
+}
+
+// ==========================================
+// QR 팝업
+// ==========================================
+function QRPopup({ title, data, onClose }) {
+  const downloadQR = () => {
+    const canvas = document.querySelector("#qr-popup-canvas canvas");
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.download = (title || "QR").replace(/\s+/g, "_") + ".png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  };
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}
+      onClick={onClose}>
+      <div style={{ background: T.bgLight, border: `2px solid ${T.goldBorder}`, borderRadius: 12, padding: 28, textAlign: "center", maxWidth: 380, width: "92%" }}
+        onClick={e => e.stopPropagation()}>
+        <p style={{ fontSize: 16, color: T.gold, fontWeight: 700, margin: "0 0 4px" }}>{title}</p>
+        <p style={{ fontSize: 11, color: T.goldDim, margin: "0 0 16px", wordBreak: "break-all" }}>{data}</p>
+        <div id="qr-popup-canvas"><QRCanvas data={data} size={260} /></div>
+        <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          <button onClick={downloadQR} style={{ ...P.outline, padding: "8px 20px", fontSize: 13, color: T.gold, borderColor: T.gold }}>📥 이미지 저장</button>
+          <CopyBtn text={data} label="주소 복사" />
+          <button onClick={onClose} style={{ ...P.outline, padding: "8px 20px", fontSize: 13 }}>닫기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 복사 + 문자 보내기 헬퍼
+// ==========================================
+function CopyBtn({ text, label }) {
+  const [copied, setCopied] = useState(false);
+  const doCopy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { /* fallback */ const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+  };
+  return <button onClick={doCopy} style={{ ...P.outline, padding: "4px 10px", fontSize: 11, color: copied ? T.success : T.goldWarm, borderColor: copied ? T.success : T.goldBorder }}>{copied ? "복사됨 ✓" : (label || "복사")}</button>;
+}
+
+function SmsBtn({ phone, message }) {
+  const href = `sms:${phone || ""}?body=${encodeURIComponent(message)}`;
+  return <a href={href} style={{ ...P.outline, padding: "4px 10px", fontSize: 11, textDecoration: "none", display: "inline-block" }}>문자 보내기</a>;
+}
+
+// ==========================================
+// 지점 관리 (카드 형태)
+// ==========================================
+function BrMgmt({ branches, siteUrl, onSave }) {
+  const [ei, setEi] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [delIdx, setDelIdx] = useState(null);
+  const [f, setF] = useState({ name: "", manager: "", position: "지점장", phone: "" });
+  const [qrPopup, setQrPopup] = useState(null);
+
+  const startEdit = (i) => { setEi(i); setAdding(false); setDelIdx(null); setF({ name: branches[i].name, manager: branches[i].manager, position: branches[i].position || "", phone: branches[i].phone }); };
+  const startAdd = () => { setAdding(true); setEi(null); setDelIdx(null); setF({ name: "", manager: "", position: "지점장", phone: "" }); };
+  const cancel = () => { setEi(null); setAdding(false); setDelIdx(null); };
+  const saveEdit = () => { if (!f.name.trim()) { alert("지점명 필수"); return; } const u = [...branches]; u[ei] = { ...u[ei], ...f }; onSave(u); setEi(null); };
+  const saveAdd = () => { if (!f.name.trim()) { alert("지점명 필수"); return; } onSave([...branches, { id: f.name.replace(/\s/g, "") + "_" + Date.now(), ...f }]); setAdding(false); };
+  const confirmDel = (i) => { onSave(branches.filter((_, x) => x !== i)); setDelIdx(null); setEi(null); };
+
+  const brFormUrl = (b) => makeFormUrl(siteUrl, b.id);
+  const getPhoneTel = (b) => `tel:${(b.phone || "").replace(/-/g, "")}`;
+
+  return (
+    <div>
+      {qrPopup && <QRPopup title={qrPopup.title} data={qrPopup.data} onClose={() => setQrPopup(null)} />}
+
+      {branches.map((b, i) => (
+        <div key={b.id}>
+          {ei === i ? (
+            // 수정 모드
+            <div style={{ ...P.card, border: `1px solid ${T.goldBorder}` }}>
+              <p style={{ fontSize: 14, color: T.gold, fontWeight: 700, margin: "0 0 12px" }}>#{i + 1} {b.name} 수정</p>
+              <BrForm f={f} setF={setF} />
+              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                <button onClick={saveEdit} style={{ ...P.gold, flex: 1, padding: "10px", fontSize: 13 }}>저장</button>
+                <button onClick={cancel} style={{ ...P.outline, flex: 1, padding: "10px", fontSize: 13 }}>취소</button>
+                <button onClick={() => { setEi(null); setDelIdx(i); }} style={{ padding: "10px 14px", fontSize: 13, background: "rgba(194,85,85,0.15)", border: `1px solid ${T.danger}`, borderRadius: 6, color: T.danger, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>삭제</button>
+              </div>
+            </div>
+          ) : (
+            // 지점 카드
+            <div style={P.card}>
+              {/* 상단: 지점명 + 수정/삭제 버튼 */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                <div>
+                  <p style={{ fontSize: 17, fontWeight: 700, color: T.gold, margin: "0 0 2px" }}>#{i + 1} {b.name}</p>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => startEdit(i)} style={{ background: "none", border: `1px solid ${T.goldBorder}`, borderRadius: 4, color: T.goldWarm, fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>수정</button>
+                  <button onClick={() => setDelIdx(i)} style={{ background: "none", border: `1px solid ${T.danger}`, borderRadius: 4, color: T.danger, fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>삭제</button>
+                </div>
+              </div>
+
+              {/* 삭제 확인 */}
+              {delIdx === i && (
+                <div style={{ background: "rgba(194,85,85,0.1)", border: `1px solid ${T.danger}`, borderRadius: 6, padding: 12, marginBottom: 10, textAlign: "center" }}>
+                  <p style={{ fontSize: 13, color: T.danger, margin: "0 0 8px" }}>"{b.name}" 지점을 삭제하시겠습니까?</p>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                    <button onClick={() => confirmDel(i)} style={{ background: T.danger, border: "none", borderRadius: 6, color: "#fff", fontSize: 12, padding: "6px 16px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>삭제</button>
+                    <button onClick={() => setDelIdx(null)} style={{ ...P.outline, padding: "6px 16px", fontSize: 12 }}>취소</button>
+                  </div>
+                </div>
+              )}
+
+              {/* 담당자 정보 */}
+              <div style={{ display: "grid", gap: "4px 0", marginBottom: 12 }}>
+                <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>담당자: <span style={{ color: T.goldSoft, fontWeight: 600 }}>{b.manager || "-"}</span></p>
+                <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>직책: <span style={{ color: T.goldSoft }}>{b.position || "-"}</span></p>
+                <p style={{ fontSize: 14, color: T.goldDim, margin: 0 }}>연락처: <span style={{ color: T.goldSoft, fontWeight: 600 }}>{b.phone || "-"}</span></p>
+              </div>
+
+              {/* 구분선 */}
+              <div style={{ height: 1, background: "rgba(139,105,20,0.2)", margin: "0 0 12px" }} />
+
+              {/* QR 버튼 (가운데 정렬) */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                <button onClick={() => setQrPopup({ title: `${b.name} 상담 폼 QR`, data: brFormUrl(b) })} style={{
+                  ...P.outline, padding: "6px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 4,
+                }}>📱 지점 폼 QR</button>
+                {b.phone && (
+                  <button onClick={() => setQrPopup({ title: `${b.manager || b.name} 전화 QR`, data: getPhoneTel(b) })} style={{
+                    ...P.outline, padding: "6px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 4,
+                  }}>📞 전화 QR</button>
+                )}
+              </div>
+
+              {/* 웹 주소 + 복사 + 문자 (가운데 정렬) */}
+              <div style={{ background: "rgba(139,105,20,0.06)", borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
+                <p style={{ fontSize: 11, color: T.goldDim, margin: "0 0 6px" }}>지점 폼 주소</p>
+                <p style={{ fontSize: 12, color: T.goldSoft, margin: "0 0 8px", wordBreak: "break-all", fontFamily: "monospace" }}>{brFormUrl(b)}</p>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                  <CopyBtn text={brFormUrl(b)} />
+                  <SmsBtn message={`[LASBOOK ${b.name}] 상담 신청 페이지입니다: ${brFormUrl(b)}`} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* 새 지점 추가 */}
+      {adding ? (
+        <div style={{ ...P.card, border: `1px solid ${T.goldBorder}` }}>
+          <p style={{ fontSize: 14, color: T.gold, fontWeight: 700, margin: "0 0 12px" }}>새 지점 추가</p>
+          <BrForm f={f} setF={setF} />
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button onClick={saveAdd} style={{ ...P.gold, flex: 1, padding: "10px", fontSize: 13 }}>추가</button>
+            <button onClick={cancel} style={{ ...P.outline, flex: 1, padding: "10px", fontSize: 13 }}>취소</button>
+          </div>
+        </div>
+      ) : <button onClick={startAdd} style={{ ...P.gold, width: "100%", padding: "14px", fontSize: 14, marginTop: 12 }}>+ 새 지점 추가</button>}
+    </div>
+  );
+}
+function BrForm({ f, setF }) { return <div style={{ display: "grid", gap: 10 }}>{[{ k: "name", l: "지점명 *", ph: "예: 수원점" }, { k: "manager", l: "담당자", ph: "이름" }, { k: "position", l: "직책", ph: "예: 지점장" }, { k: "phone", l: "연락처", ph: "010-0000-0000" }].map(({ k, l, ph }) => <div key={k}><label style={{ fontSize: 12, color: T.goldDim, display: "block", marginBottom: 4 }}>{l}</label><input value={f[k] || ""} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} placeholder={ph} style={{ ...P.inp, fontSize: 14 }} /></div>)}</div>; }
+
+function Settings({ pw, siteUrl, onSave, onSaveUrl }) {
+  const [np, setNp] = useState(""); const [cp, setCp] = useState(""); const [msg, setMsg] = useState({ t: "", ok: false });
+  const [urlInput, setUrlInput] = useState(siteUrl || ""); const [urlMsg, setUrlMsg] = useState({ t: "", ok: false });
+
+  const go = () => { if (!np.trim()) { setMsg({ t: "새 비밀번호를 입력해 주세요.", ok: false }); return; } if (np !== cp) { setMsg({ t: "비밀번호 불일치", ok: false }); return; } onSave(np); setNp(""); setCp(""); setMsg({ t: "변경 완료", ok: true }); setTimeout(() => setMsg({ t: "", ok: false }), 3000); };
+
+  const saveUrlFn = () => {
+    onSaveUrl(urlInput.trim());
+    setUrlMsg({ t: "주소 저장 완료", ok: true }); setTimeout(() => setUrlMsg({ t: "", ok: false }), 3000);
+  };
+
+  return (
+    <div>
+      {/* 사이트 주소 설정 */}
+      <div style={P.card}>
+        <p style={{ fontSize: 16, fontWeight: 700, color: T.gold, margin: "0 0 4px" }}>사이트 주소 설정</p>
+        <p style={{ fontSize: 12, color: T.goldDim, margin: "0 0 6px", lineHeight: 1.6 }}>
+          HTML 파일을 인터넷에 올린 후, 그 주소를 입력하세요.<br />
+          QR코드와 지점 URL이 이 주소 기반으로 생성됩니다.
+        </p>
+        {siteUrl ? (
+          <p style={{ fontSize: 13, color: T.success, margin: "0 0 12px", fontWeight: 600 }}>현재: {siteUrl}</p>
+        ) : (
+          <p style={{ fontSize: 12, color: T.goldWarm, margin: "0 0 12px" }}>미설정 — 기본 Netlify 주소({NETLIFY_URL})가 사용됩니다</p>
+        )}
+        <FI label="사이트 주소" placeholder="예: https://mysite.com/lasbook.html" value={urlInput} onChange={setUrlInput} />
+        {urlMsg.t && <p style={{ fontSize: 13, margin: "0 0 8px", textAlign: "center", color: urlMsg.ok ? T.success : T.danger }}>{urlMsg.t}</p>}
+        <button onClick={saveUrlFn} style={{ ...P.gold, width: "100%", padding: "12px", fontSize: 14 }}>주소 저장</button>
+      </div>
+
+      {/* 비밀번호 변경 */}
+      <div style={{ ...P.card, marginTop: 10 }}>
+        <p style={{ fontSize: 16, fontWeight: 700, color: T.gold, margin: "0 0 4px" }}>통합 비밀번호 관리</p>
+        <p style={{ fontSize: 13, color: T.goldDim, margin: "0 0 6px" }}>모든 지점 "관리자 로그인" 비밀번호</p>
+        <p style={{ fontSize: 14, color: T.goldWarm, margin: "0 0 20px", fontWeight: 600 }}>현재: {pw}</p>
+        <Div />
+        <FI label="새 비밀번호" placeholder="입력" type="password" value={np} onChange={setNp} />
+        <FI label="확인" placeholder="한번 더" type="password" value={cp} onChange={setCp} />
+        {msg.t && <p style={{ fontSize: 13, margin: "0 0 12px", textAlign: "center", color: msg.ok ? T.success : T.danger }}>{msg.t}</p>}
+        <button onClick={go} style={{ ...P.gold, width: "100%", padding: "12px", fontSize: 14 }}>비밀번호 변경</button>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 백업/복원
+// ==========================================
+function BackupRestore({ onBackup, onRestore }) {
+  const fileRef = useRef(null);
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (file) { onRestore(file); e.target.value = ""; }
+  };
+  return (
+    <div style={{ ...P.card, marginTop: 16 }}>
+      <p style={{ fontSize: 15, fontWeight: 700, color: T.gold, margin: "0 0 4px", textAlign: "center" }}>데이터 백업 / 복원</p>
+      <p style={{ fontSize: 12, color: T.goldDim, margin: "0 0 14px", textAlign: "center", lineHeight: 1.6 }}>
+        백업 파일(JSON)을 다운로드하거나, 기존 백업 파일로 1회 복원할 수 있습니다.
+      </p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onBackup} style={{ ...P.gold, flex: 1, padding: "12px", fontSize: 14 }}>백업 다운로드</button>
+        <button onClick={() => fileRef.current?.click()} style={{ ...P.outline, flex: 1, padding: "12px", fontSize: 14, color: T.goldWarm }}>복원 (파일 선택)</button>
+      </div>
+      <input ref={fileRef} type="file" accept=".json" onChange={handleFile} style={{ display: "none" }} />
+      <p style={{ fontSize: 11, color: T.goldDim, margin: "10px 0 0", textAlign: "center" }}>복원 시 현재 데이터가 백업 파일의 데이터로 교체됩니다</p>
+    </div>
+  );
+}
+
+// ==========================================
+// 공지 아코디언 아이템 (제목 클릭 시 내용 펼침)
+// ==========================================
+// 지점별 아코디언 현황 (전체 현황 탭)
+// ==========================================
+function BranchDataView({ branches, subs, search, setSearch, sortBy, setSortBy, dateFrom, setDateFrom, dateTo, setDateTo, onEdit, onDelete }) {
+  const [openBranches, setOpenBranches] = useState(() => {
+    const init = {};
+    branches.forEach(b => { init[b.name] = true; });
+    return init;
+  });
+  const [showCounts, setShowCounts] = useState({});
+
+  const toggleBranch = (name) => setOpenBranches(p => ({ ...p, [name]: !p[name] }));
+  const getShowCount = (name) => showCounts[name] || 5;
+  const setShowCount = (name, n) => setShowCounts(p => ({ ...p, [name]: n }));
+
+  const allFiltered = filterAndSort(subs, { search, sortBy, dateFrom, dateTo });
+
+  return (
+    <>
+      <AdminToolbar search={search} setSearch={setSearch} sortBy={sortBy} setSortBy={setSortBy} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
+      <p style={{ fontSize: 12, color: T.goldDim, textAlign: "center", marginBottom: 12 }}>
+        전체 {allFiltered.length}건{allFiltered.length !== subs.length ? ` (검색) / 총 ${subs.length}건` : ""}
+      </p>
+
+      {branches.map(b => {
+        const brSubs = filterAndSort(subs.filter(s => s.branchName === b.name), { search, sortBy, dateFrom, dateTo });
+        const isOpen = openBranches[b.name];
+        const sc = getShowCount(b.name);
+        return (
+          <div key={b.id} style={{ marginBottom: 12 }}>
+            {/* 지점 헤더 (아코디언 토글) */}
+            <div onClick={() => toggleBranch(b.name)} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "14px 16px", cursor: "pointer", userSelect: "none",
+              background: T.bgLight, border: `1px solid ${T.goldBorder}`, borderRadius: isOpen ? "8px 8px 0 0" : 8,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 14, color: T.gold, transition: "transform 0.2s", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+                <span style={{ fontSize: 15, color: T.gold, fontWeight: 700 }}>{b.name}</span>
+                <span style={{ fontSize: 12, color: T.goldDim }}>({brSubs.length}건)</span>
+              </div>
+              <span style={{ fontSize: 12, color: T.goldDim }}>{b.manager || ""} {b.position || ""}</span>
+            </div>
+
+            {/* 지점 내용 (펼침) */}
+            {isOpen && (
+              <div style={{ border: `1px solid ${T.goldBorder}`, borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px" }}>
+                {brSubs.length === 0 ? (
+                  <p style={{ textAlign: "center", color: T.goldDim, fontSize: 13, padding: 16 }}>{search || dateFrom || dateTo ? "검색 결과 없음" : "접수 내역 없음"}</p>
+                ) : (
+                  <>
+                    {brSubs.slice(0, sc).map(s => <EditableCard key={s.id} s={s} showBr={false} onEdit={onEdit} onDelete={onDelete} />)}
+                    {brSubs.length > sc && (
+                      <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontSize: 12, color: T.goldDim }}>더 보기:</span>
+                        {[10, 15, 20].filter(n => n > sc).map(n => (
+                          <button key={n} onClick={() => setShowCount(b.name, n)} style={{ ...P.outline, padding: "5px 12px", fontSize: 11, color: T.goldWarm, borderColor: T.goldBorder }}>{n}명</button>
+                        ))}
+                        <button onClick={() => setShowCount(b.name, brSubs.length)} style={{ ...P.outline, padding: "5px 12px", fontSize: 11, color: T.gold, borderColor: T.gold }}>전체</button>
+                      </div>
+                    )}
+                    {brSubs.length > 5 && sc > 5 && (
+                      <div style={{ textAlign: "center", marginTop: 8 }}>
+                        <button onClick={() => setShowCount(b.name, 5)} style={{ ...P.outline, padding: "5px 12px", fontSize: 11, color: T.goldDim, borderColor: T.goldBorder }}>접기</button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+// ==========================================
+// 공지 아코디언 아이템 (제목 클릭 시 내용 펼침)
+// ==========================================
+function NoticeItem({ n, delId, setDelId, doDelete, startEdit, isAdmin }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ ...P.card, position: "relative", overflow: "hidden", padding: 0 }}>
+      {/* 삭제 확인 오버레이 */}
+      {isAdmin && delId === n.id && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(26,16,8,0.92)", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", zIndex: 10, borderRadius: 8,
+        }}>
+          <p style={{ fontSize: 13, color: T.danger, margin: "0 0 12px" }}>이 공지를 삭제하시겠습니까?</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => doDelete(n.id)} style={{ background: T.danger, border: "none", borderRadius: 6, color: "#fff", fontSize: 13, padding: "8px 20px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>삭제</button>
+            <button onClick={() => setDelId(null)} style={{ background: "none", border: `1px solid ${T.goldBorder}`, borderRadius: 6, color: T.goldWarm, fontSize: 13, padding: "8px 20px", cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+          </div>
+        </div>
+      )}
+      {/* 제목 바 (클릭으로 토글) */}
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", cursor: "pointer", userSelect: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 14, color: open ? T.gold : T.goldWarm, transition: "transform 0.2s", transform: open ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>▶</span>
+          <p style={{ fontSize: 14, color: T.gold, fontWeight: 700, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.title}</p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ fontSize: 11, color: T.goldDim }}>{n.date}</span>
+          {isAdmin && <>
+            <button onClick={e => { e.stopPropagation(); startEdit(n); }} style={{ background: "none", border: "none", color: T.goldWarm, fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: "2px 4px" }}>수정</button>
+            <button onClick={e => { e.stopPropagation(); setDelId(n.id); }} style={{ background: "none", border: "none", color: T.danger, fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: "2px 4px" }}>삭제</button>
+          </>}
+        </div>
+      </div>
+      {/* 내용 (펼침) */}
+      {open && (
+        <div style={{ padding: "0 16px 14px 38px", borderTop: `1px solid rgba(139,105,20,0.2)` }}>
+          <p style={{ fontSize: 13, color: T.goldSoft, margin: "12px 0 6px", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{n.content}</p>
+          {n.editDate && <p style={{ fontSize: 11, color: T.goldDim, margin: 0 }}>수정: {n.editDate}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 고객용 공지 아코디언 (지점 페이지)
+// ==========================================
+function NoticeAccordion({ notices }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <p style={{ fontSize: 13, color: T.gold, fontWeight: 700, marginBottom: 8, textAlign: "center" }}>공지사항</p>
+      {notices.slice(0, 5).map(n => (
+        <NoticeItem key={n.id} n={n} isAdmin={false} />
+      ))}
+    </div>
+  );
+}
+
+// ==========================================
+// 공지사항 (관리자 작성)
+// ==========================================
+function NoticeBoard({ notices, onSave }) {
+  const [writing, setWriting] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [delId, setDelId] = useState(null);
+
+  const startWrite = () => { setWriting(true); setEditId(null); setTitle(""); setContent(""); };
+  const startEdit = (n) => { setWriting(true); setEditId(n.id); setTitle(n.title); setContent(n.content); };
+  const cancel = () => { setWriting(false); setEditId(null); setTitle(""); setContent(""); };
+
+  const save = () => {
+    if (!title.trim()) { alert("제목을 입력해 주세요."); return; }
+    if (!content.trim()) { alert("내용을 입력해 주세요."); return; }
+    if (editId) {
+      const updated = notices.map(n => n.id === editId ? { ...n, title: title.trim(), content: content.trim(), editDate: new Date().toLocaleString("ko-KR") } : n);
+      onSave(updated);
+    } else {
+      const newNotice = { id: uid(), title: title.trim(), content: content.trim(), date: new Date().toLocaleString("ko-KR") };
+      onSave([newNotice, ...notices]);
+    }
+    cancel();
+  };
+
+  const doDelete = (id) => { onSave(notices.filter(n => n.id !== id)); setDelId(null); };
+
+  return (
+    <div>
+      {/* 작성/수정 폼 */}
+      {writing ? (
+        <div style={{ ...P.card, border: `1px solid ${T.goldBorder}` }}>
+          <p style={{ fontSize: 15, color: T.gold, fontWeight: 700, margin: "0 0 12px" }}>{editId ? "공지 수정" : "새 공지 작성"}</p>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: T.goldDim, display: "block", marginBottom: 4 }}>제목</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="공지 제목" style={{ ...P.inp, fontSize: 14 }} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: T.goldDim, display: "block", marginBottom: 4 }}>내용</label>
+            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="공지 내용을 입력하세요" rows={5}
+              style={{ ...P.inp, fontSize: 13, padding: "10px 12px", resize: "vertical", minHeight: 80 }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={save} style={{ ...P.gold, flex: 1, padding: "10px", fontSize: 13 }}>{editId ? "수정 완료" : "등록"}</button>
+            <button onClick={cancel} style={{ ...P.outline, flex: 1, padding: "10px", fontSize: 13 }}>취소</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={startWrite} style={{ ...P.gold, width: "100%", padding: "14px", fontSize: 14, marginBottom: 12 }}>+ 새 공지 작성</button>
+      )}
+
+      {/* 공지 목록 (아코디언) */}
+      {notices.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 40 }}><p style={{ color: T.goldDim, fontSize: 15 }}>등록된 공지가 없습니다</p></div>
+      ) : notices.map(n => (
+        <NoticeItem key={n.id} n={n} delId={delId} setDelId={setDelId} doDelete={doDelete} startEdit={startEdit} isAdmin />
+      ))}
+    </div>
+  );
+}
+
+// ==========================================
+// 전화번호 3-4-4
+// ==========================================
+function PhoneInput({ value, onChange }) {
+  const parts = (value || "").split("-");
+  const [p1, setP1] = useState(parts[0] || ""); const [p2, setP2] = useState(parts[1] || ""); const [p3, setP3] = useState(parts[2] || "");
+  const r2 = useRef(null); const r3 = useRef(null);
+  const up = (a, b, c) => { setP1(a); setP2(b); setP3(c); onChange(`${a}-${b}-${c}`); };
+  return <div style={{ marginBottom: 14 }}><label style={P.label}>연락처 <span style={{ color: "#c9956b", fontSize: 11 }}>*필수</span></label><div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <input id="ph1" type="tel" inputMode="numeric" value={p1} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 3); up(v, p2, p3); if (v.length === 3) r2.current?.focus(); }} placeholder="010" maxLength={3} style={{ background: T.cream, border: `1px solid ${T.creamBorder}`, borderRadius: 6, fontFamily: "inherit", fontSize: 16, color: T.bg, outline: "none", textAlign: "center", padding: "12px 4px", boxSizing: "border-box", width: "28%" }} />
+    <span style={{ color: T.goldDim, fontSize: 18, fontWeight: 700 }}>-</span>
+    <input ref={r2} type="tel" inputMode="numeric" value={p2} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); up(p1, v, p3); if (v.length === 4) r3.current?.focus(); }} onKeyDown={e => { if (e.key === "Backspace" && !p2) document.getElementById("ph1")?.focus(); }} placeholder="0000" maxLength={4} style={{ background: T.cream, border: `1px solid ${T.creamBorder}`, borderRadius: 6, fontFamily: "inherit", fontSize: 16, color: T.bg, outline: "none", textAlign: "center", padding: "12px 4px", boxSizing: "border-box", width: "33%" }} />
+    <span style={{ color: T.goldDim, fontSize: 18, fontWeight: 700 }}>-</span>
+    <input ref={r3} type="tel" inputMode="numeric" value={p3} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); up(p1, p2, v); }} onKeyDown={e => { if (e.key === "Backspace" && !p3) r2.current?.focus(); }} placeholder="0000" maxLength={4} style={{ background: T.cream, border: `1px solid ${T.creamBorder}`, borderRadius: 6, fontFamily: "inherit", fontSize: 16, color: T.bg, outline: "none", textAlign: "center", padding: "12px 4px", boxSizing: "border-box", width: "33%" }} />
+  </div></div>;
+}
+
+function PwGate({ title, pw, onOk, onBack }) {
+  const [v, setV] = useState(""); const [err, setErr] = useState(false); const ref = useRef(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  const check = () => { if (v === pw) onOk(); else { setErr(true); setV(""); setTimeout(() => setErr(false), 1500); } };
+  return <div style={{ ...P.page, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ ...P.box, padding: "48px 24px", textAlign: "center", maxWidth: 360 }}><button onClick={onBack} style={P.back}>← 뒤로</button><Header title={title} /><p style={{ fontSize: 14, color: T.goldSoft, marginBottom: 16 }}>비밀번호를 입력하세요</p><input ref={ref} type="password" inputMode="numeric" maxLength={10} placeholder="····" value={v} onChange={e => setV(e.target.value)} onKeyDown={e => e.key === "Enter" && check()} style={{ ...P.inp, textAlign: "center", maxWidth: 180, margin: "0 auto 16px", display: "block", fontSize: 22, letterSpacing: 10, padding: "14px", borderColor: err ? T.danger : T.creamBorder }} />{err && <p style={{ color: T.danger, fontSize: 13, marginBottom: 12 }}>비밀번호가 틀렸습니다</p>}<button onClick={check} style={{ ...P.gold, padding: "12px 40px", fontSize: 15 }}>확인</button></div></div>;
+}
+
+function Splash({ text }) { return <div style={{ ...P.page, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: T.goldDim, letterSpacing: 6, marginBottom: 12 }}>L A S B O O K</div><div style={{ fontSize: 15, color: T.goldSoft }}>{text}</div></div></div>; }
+function Header({ title, sub }) { return <div style={{ textAlign: "center", marginBottom: 20 }}><div style={{ fontSize: 11, color: T.goldDim, letterSpacing: 6, marginBottom: 6 }}>L A S B O O K</div>{title && <h1 style={{ fontSize: 20, color: T.gold, margin: "0 0 4px", fontWeight: 700 }}>{title}</h1>}{sub && <p style={{ fontSize: 13, color: T.goldDim, margin: 0 }}>{sub}</p>}</div>; }
+function Div() { return <div style={{ height: 1, background: `linear-gradient(90deg, transparent, ${T.goldBorder}, transparent)`, margin: "20px 0" }} />; }
+function Sec({ children }) { return <p style={{ fontSize: 15, fontWeight: 700, color: T.goldSoft, margin: "0 0 14px", textAlign: "center" }}>{children}</p>; }
+function FI({ label, req, placeholder, value, onChange, type = "text" }) { return <div style={{ marginBottom: 14 }}><label style={P.label}>{label} {req && <span style={{ color: "#c9956b", fontSize: 11 }}>*필수</span>}</label><input type={type} placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)} style={P.inp} /></div>; }
+
+const P = {
+  page: { minHeight: "100vh", background: `linear-gradient(170deg, ${T.bg} 0%, #110c05 50%, ${T.bg} 100%)`, fontFamily: "'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif", padding: "20px 16px", boxSizing: "border-box" },
+  box: { maxWidth: 420, margin: "0 auto", background: `linear-gradient(180deg, ${T.bgLight} 0%, #150e06 100%)`, border: `1.5px solid ${T.goldBorder}`, borderRadius: 12, padding: "28px 22px", position: "relative" },
+  label: { display: "block", fontSize: 13, fontWeight: 500, color: T.goldWarm, marginBottom: 6 },
+  inp: { width: "100%", padding: "12px 14px", background: T.cream, border: `1px solid ${T.creamBorder}`, borderRadius: 6, fontFamily: "inherit", fontSize: 14, color: T.bg, outline: "none", boxSizing: "border-box" },
+  sel: { width: "100%", padding: "12px 14px", background: T.cream, border: `1px solid ${T.creamBorder}`, borderRadius: 6, fontFamily: "inherit", fontSize: 14, color: T.bg, outline: "none", boxSizing: "border-box" },
+  gold: { display: "inline-block", padding: "10px 24px", background: `linear-gradient(135deg, ${T.goldBorder}, ${T.goldWarm}, ${T.goldBorder})`, border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 14, fontWeight: 700, color: T.bg, cursor: "pointer", textDecoration: "none", textAlign: "center" },
+  outline: { display: "inline-block", padding: "8px 20px", background: "transparent", border: `1px solid ${T.goldBorder}`, borderRadius: 6, color: T.goldWarm, fontFamily: "inherit", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none", textAlign: "center" },
+  menuBtn: { display: "block", width: "100%", padding: "14px 16px", background: "rgba(139,105,20,0.08)", border: `1px solid ${T.goldBorder}`, borderRadius: 8, fontFamily: "inherit", fontSize: 14, fontWeight: 500, color: T.gold, cursor: "pointer", textAlign: "left" },
+  back: { background: "none", border: "none", color: T.goldDim, fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: "4px 0", marginBottom: 8 },
+  card: { background: "rgba(139,105,20,0.08)", border: `1px solid rgba(139,105,20,0.25)`, borderRadius: 8, padding: 16, marginBottom: 10 },
+  badge: { display: "inline-block", padding: "3px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, color: T.cream },
+};
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
